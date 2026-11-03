@@ -1,0 +1,3 @@
+environment: echo
+logLevel: debug
+apiStage: echo

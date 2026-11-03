@@ -1,0 +1,11 @@
+version = 1
+project = "smartstock"
+
+[environments.echo]
+stage = "echo"
+
+[environments.staging]
+stage = "staging"
+
+[environments.production]
+stage = "production"

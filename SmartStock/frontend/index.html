@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartStock | Inventory Management</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<aside class="sidebar">
+  <h2>SmartStock</h2>
+  <p>Inventory Platform</p>
+  <nav>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#products">Products</a>
+    <a href="#orders">Orders</a>
+  </nav>
+</aside>
+<main>
+<header>
+  <div><h1>Inventory Dashboard</h1>
+  <p>Manage your inventory and orders</p></div>
+  <span class="status">System Online</span>
+</header>
+<section class="stats">
+  <article><h3>Total Products</h3><strong id="total">0</strong></article>
+  <article><h3>Low Stock</h3><strong id="low">0</strong></article>
+  <article><h3>Total Units</h3><strong id="units">0</strong></article>
+</section>
+<section id="products">
+<h2>Product Inventory</h2>
+<form id="productForm">
+<input id="name" placeholder="Product name" required>
+<input id="quantity" type="number" min="0" placeholder="Quantity" required>
+<input id="price" type="number" min="0" step="0.01" placeholder="Price" required>
+<button>Add Product</button>
+</form>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Product</th><th>Quantity</th><th>Price</th><th>Action</th></tr></thead>
+<tbody id="productList"></tbody>
+</table>
+</div>
+</section>
+<section id="orders">
+<h2>Orders</h2>
+<p>Order management API is available in the backend.</p>
+<div id="message"></div>
+</section>
+</main>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

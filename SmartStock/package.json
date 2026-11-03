@@ -1,0 +1,8 @@
+{
+  "name": "smartstock",
+  "version": "1.0.0",
+  "description": "Serverless inventory management platform",
+  "scripts": {
+    "start": "npx serve frontend"
+  }
+}

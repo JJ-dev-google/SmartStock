@@ -1,0 +1,3 @@
+environment: production
+logLevel: warn
+apiStage: production

@@ -1,0 +1,3 @@
+environment: staging
+logLevel: info
+apiStage: staging

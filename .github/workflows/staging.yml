@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - staging
-
   workflow_dispatch:
 
 env:
@@ -26,7 +25,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup AWS Credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -48,22 +47,25 @@ jobs:
           cd backend
           zip -r ../backend.zip .
 
-      - name: Verify SAM Template
+      - name: Validate Template
         run: |
           sam validate --template-file infrastructure/template.yaml
 
-      - name: Deploy Using AWS SAM
+      - name: Deploy Staging
         run: |
           sam deploy \
-  --template-file infrastructure/template.yaml \
-  --no-confirm-changeset \
-  --no-fail-on-empty-changeset \
-  --stack-name ${{ env.STACK_NAME }} \
-  --s3-prefix ${{ env.STACK_NAME }} \
-  --parameter-overrides Environment=staging DeploymentBucket=${{ secrets.DEPLOYMENT_BUCKET }} ArtifactKey=smartstock/staging/backend.zip \
-  --resolve-s3 \
-  --capabilities CAPABILITY_IAM \
-  --region ${{ env.AWS_REGION }}
+            --template-file infrastructure/template.yaml \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --stack-name ${{ env.STACK_NAME }} \
+            --s3-prefix ${{ env.STACK_NAME }} \
+            --parameter-overrides \
+              Environment=${{ env.TARGET_ENV }} \
+              DeploymentBucket=${{ secrets.DEPLOYMENT_BUCKET }} \
+              ArtifactKey=smartstock/staging/backend.zip \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --region ${{ env.AWS_REGION }}
 
       - name: Display Deployment Status
         run: |

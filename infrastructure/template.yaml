@@ -4,8 +4,18 @@ Description: SmartStock serverless infrastructure
 Parameters:
   Environment:
     Type: String
-    Default: echo
-    AllowedValues: [echo, staging, production]
+    AllowedValues:
+      - echo
+      - staging
+      - production
+
+  DeploymentBucket:
+    Type: String
+    Description: Existing S3 bucket containing Lambda deployment ZIP
+
+  ArtifactKey:
+    Type: String
+    Default: smartstock/backend.zip
 
 Resources:
   FrontendBucket:

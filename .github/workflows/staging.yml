@@ -1,20 +1,74 @@
+
 name: SmartStock Staging Deployment
+
 on:
   push:
-    branches: [staging]
+    branches:
+      - staging
+
+  workflow_dispatch:
+
+env:
+  TARGET_ENV: staging
+  STACK_NAME: smartstock-staging
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-      - uses: aws-actions/configure-aws-credentials@v4
+
+      - name: Setup AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-      - run: cd backend/handlers && zip -r ../../backend.zip .
-      - run: |
-          aws cloudformation deploy             --template-file infrastructure/template.yaml             --stack-name smartstock-staging             --parameter-overrides Environment=staging DeploymentBucket=${{ secrets.DEPLOYMENT_BUCKET }}             --capabilities CAPABILITY_IAM
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Install Backend Dependencies
+        run: |
+          cd backend
+          npm install --omit=dev
+
+      - name: Package Backend
+        run: |
+          cd backend
+          zip -r ../backend.zip .
+
+      - name: Verify SAM Template
+        run: |
+          sam validate --template-file infrastructure/template.yaml
+
+      - name: Deploy Using AWS SAM
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --config-env ${{ env.TARGET_ENV }} \
+            --stack-name ${{ env.STACK_NAME }} \
+            --s3-prefix ${{ env.STACK_NAME }} \
+            --parameter-overrides Environment=${{ env.TARGET_ENV }} DeploymentBucket=${{ secrets.DEPLOYMENT_BUCKET }} ArtifactKey=smartstock/staging/backend.zip \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Display Deployment Status
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].StackStatus" \
+            --output text

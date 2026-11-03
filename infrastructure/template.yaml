@@ -1,46 +1,56 @@
+
 AWSTemplateFormatVersion: '2010-09-09'
-Description: SmartStock serverless infrastructure
+Transform: AWS::Serverless-2016-10-31
+Description: SmartStock - Serverless Inventory Management Platform
 
 Parameters:
   Environment:
     Type: String
+    Default: echo
     AllowedValues:
       - echo
       - staging
       - production
 
-  DeploymentBucket:
-    Type: String
-    Description: Existing S3 bucket containing Lambda deployment ZIP
-
-  ArtifactKey:
-    Type: String
-    Default: smartstock/backend.zip
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 20
+    MemorySize: 256
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
 
 Resources:
+
+  # S3 bucket for persistent inventory and order data
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'smartstock-data-${Environment}-${AWS::AccountId}-${AWS::Region}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Private S3 bucket for frontend
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'smartstock-${Environment}-${AWS::AccountId}'
+      BucketName: !Sub 'smartstock-web-${Environment}-${AWS::AccountId}-${AWS::Region}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  ProductsFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub 'smartstock-products-${Environment}'
-      Runtime: nodejs22.x
-      Handler: products.handler
-      Role: !GetAtt LambdaRole.Arn
-      Code:
-        S3Bucket: !Ref DeploymentBucket
-        S3Key: backend.zip
-      Timeout: 15
-
-  LambdaRole:
+  # Lambda execution role and permissions
+  SmartStockLambdaRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -52,82 +62,169 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SmartStockS3DataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub '${DataBucket.Arn}/*'
 
-  Api:
-    Type: AWS::ApiGateway::RestApi
+  # API Gateway REST API
+  SmartStockApi:
+    Type: AWS::Serverless::Api
     Properties:
       Name: !Sub 'smartstock-api-${Environment}'
-
-  ProductsResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref Api
-      ParentId: !GetAtt Api.RootResourceId
-      PathPart: products
-
-  ProductsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref ProductsResource
-      HttpMethod: ANY
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub
-          - 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FunctionArn}/invocations'
-          - FunctionArn: !GetAtt ProductsFunction.Arn
-
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: ProductsMethod
-    Properties:
-      RestApiId: !Ref Api
-
-  ApiStage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      RestApiId: !Ref Api
-      DeploymentId: !Ref ApiDeployment
       StageName: !Ref Environment
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type'"
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
-  LambdaPermission:
-    Type: AWS::Lambda::Permission
+  # Node.js Lambda backend
+  SmartStockFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Ref ProductsFunction
-      Action: lambda:InvokeFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*/products'
+      FunctionName: !Sub 'smartstock-${Environment}'
+      CodeUri: ../backend/
+      Handler: index.handler
+      Role: !GetAtt SmartStockLambdaRole.Arn
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref DataBucket
+      Events:
+        GetProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /products
+            Method: GET
 
-  Distribution:
+        CreateProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /products
+            Method: POST
+
+        UpdateProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /products/{id}
+            Method: PUT
+
+        DeleteProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /products/{id}
+            Method: DELETE
+
+        GetOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /orders
+            Method: GET
+
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /orders
+            Method: POST
+
+        GetDashboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref SmartStockApi
+            Path: /dashboard
+            Method: GET
+
+  # CloudFront private S3 origin access
+  FrontendOriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'smartstock-oac-${Environment}'
+        Description: Private SmartStock frontend access
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Frontend CDN
+  FrontendDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
         Enabled: true
         DefaultRootObject: index.html
+        HttpVersion: http2
         Origins:
-          - Id: SmartStockS3
+          - Id: SmartStockS3Origin
             DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt FrontendOriginAccess.Id
             S3OriginConfig:
               OriginAccessIdentity: ''
         DefaultCacheBehavior:
-          TargetOriginId: SmartStockS3
+          TargetOriginId: SmartStockS3Origin
           ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: [GET, HEAD]
-          CachedMethods: [GET, HEAD]
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
           ForwardedValues:
             QueryString: false
         ViewerCertificate:
           CloudFrontDefaultCertificate: true
 
-Outputs:
-  BucketName:
-    Value: !Ref FrontendBucket
-  DistributionId:
-    Value: !Ref Distribution
-  ApiId:
-    Value: !Ref Api
+  # Allow only this CloudFront distribution to read frontend files
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontRead
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action:
+              - s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub
+                  - 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${DistributionId}'
+                  - DistributionId: !Ref FrontendDistribution
 
-  # Create the deployment artifact bucket separately before deploying.
-  # This template expects DeploymentBucket to be supplied as a parameter.
+Outputs:
+  FrontendBucketName:
+    Description: Private frontend S3 bucket
+    Value: !Ref FrontendBucket
+
+  DataBucketName:
+    Description: Inventory data S3 bucket
+    Value: !Ref DataBucket
+
+  DistributionId:
+    Description: CloudFront distribution ID
+    Value: !Ref FrontendDistribution
+
+  WebsiteURL:
+    Description: SmartStock website
+    Value: !Sub 'https://${FrontendDistribution.DomainName}'
+
+  ApiURL:
+    Description: SmartStock REST API
+    Value: !Sub 'https://${SmartStockApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'

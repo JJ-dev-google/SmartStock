@@ -9,7 +9,7 @@ on:
 
 env:
   TARGET_ENV: staging
-  STACK_NAME: smartstock-staging
+  STACK_NAME: smartstock-staging-jayanka
   AWS_REGION: ${{ secrets.AWS_REGION }}
 
 jobs:
@@ -37,40 +37,67 @@ jobs:
         with:
           use-installer: true
 
-      - name: Install Backend Dependencies
-        run: |
-          cd backend
-          npm install --omit=dev
-
-      - name: Package Backend
-        run: |
-          cd backend
-          zip -r ../backend.zip .
-
-      - name: Validate Template
+      - name: Validate SAM Template
         run: |
           sam validate --template-file infrastructure/template.yaml
 
-      - name: Deploy Staging
+      - name: Build SAM Application
+        run: |
+          sam build --template-file infrastructure/template.yaml
+
+      - name: Deploy SAM Application
         run: |
           sam deploy \
-            --template-file infrastructure/template.yaml \
+            --template-file .aws-sam/build/template.yaml \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --stack-name ${{ env.STACK_NAME }} \
             --s3-prefix ${{ env.STACK_NAME }} \
-            --parameter-overrides \
-              Environment=${{ env.TARGET_ENV }} \
-              DeploymentBucket=${{ secrets.DEPLOYMENT_BUCKET }} \
-              ArtifactKey=smartstock/staging/backend.zip \
+            --parameter-overrides Environment=${{ env.TARGET_ENV }} \
             --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --region ${{ env.AWS_REGION }}
 
-      - name: Display Deployment Status
+      - name: Get CloudFormation Outputs
+        id: outputs
+        shell: bash
         run: |
-          aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --query "Stacks[0].StackStatus" \
-            --output text
+          OUTPUTS=$(aws cloudformation describe-stacks \
+            --stack-name "${{ env.STACK_NAME }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query "Stacks[0].Outputs" \
+            --output json)
+
+          API_URL=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="ApiURL") | .OutputValue')
+          FRONTEND_BUCKET=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="FrontendBucketName") | .OutputValue')
+          DISTRIBUTION_ID=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="DistributionId") | .OutputValue')
+          WEBSITE_URL=$(echo "$OUTPUTS" | jq -r '.[] | select(.OutputKey=="WebsiteURL") | .OutputValue')
+
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
+          echo "frontend_bucket=$FRONTEND_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
+          echo "website_url=$WEBSITE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Configure Frontend API
+        run: |
+          printf 'window.SMARTSTOCK_API_URL = "%s";\n' \
+            "${{ steps.outputs.outputs.api_url }}" \
+            > frontend/js/config.js
+
+      - name: Upload Frontend to S3
+        run: |
+          aws s3 sync frontend/ \
+            "s3://${{ steps.outputs.outputs.frontend_bucket }}/" \
+            --delete \
+            --region "${{ env.AWS_REGION }}"
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.outputs.outputs.distribution_id }}" \
+            --paths "/*"
+
+      - name: Display Website URL
+        run: |
+          echo "SmartStock staging deployed successfully!"
+          echo "${{ steps.outputs.outputs.website_url }}"
